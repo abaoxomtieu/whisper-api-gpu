@@ -16,7 +16,7 @@ app = FastAPI(title="Whisper API", version="0.1.0",docs_url="/")
 # Load OpenAI Whisper turbo model on GPU (CUDA)
 # OpenAI Whisper maps "turbo" to the latest turbo-capable large model
 _MODEL_NAME = "large-v3-turbo"
-model = whisper.load_model(_MODEL_NAME, device="cuda")
+model = whisper.load_model("large-v3-turbo", device="cuda", download_root="/app/models")
 
 
 class WordTiming(BaseModel):
@@ -94,24 +94,18 @@ async def translate(file: UploadFile = File(...), include_word_timings: str = Fo
         except Exception:
             pass
 
-# model_custom = whisper.load_model("small", device="cuda")
-model_custom = model
+model_custom = whisper.load_model("small", device="cuda", download_root="/app/models")
 
 
 @app.post("/translate-custom", response_model=TranslateResponse)
 async def translate_custom(
-    task: str = Form("translate"), 
+    translate_to_english: bool = Form(True),
     temperature: float = Form(0.0), 
     file: UploadFile = File(...), 
-    include_word_timings: str = Form("false")
+    include_word_timings: bool = Form(False)
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file uploaded")
-
-    # Convert string to boolean
-    include_word_timings_bool = include_word_timings.lower() in ("true", "1", "yes")
-
-    # Save to a temp file to pass a real path to whisper
 
     try:
         with tempfile.NamedTemporaryFile(
@@ -125,16 +119,17 @@ async def translate_custom(
             audio = whisper.pad_or_trim(audio)
             mel = whisper.log_mel_spectrogram(audio).to(model_custom.device)
             options = whisper.DecodingOptions(
-                task=task, temperature=temperature
+                task="translate" if translate_to_english else "transcribe",
+                temperature=temperature,
             )
             result = whisper.decode(model_custom, mel, options)
-            
+
             # Get word-level timestamps only if requested
             word_timings = None
-            if include_word_timings_bool:
+            if include_word_timings:
                 tokenizer = get_tokenizer(multilingual=True)
                 text_tokens = tokenizer.encode(result.text)
-                
+
                 alignments = find_alignment(
                     model=model_custom,
                     tokenizer=tokenizer,
@@ -142,7 +137,7 @@ async def translate_custom(
                     mel=mel,
                     num_frames=mel.shape[-1],
                 )
-                
+
                 # Convert alignments to WordTiming objects
                 word_timings = []
                 for alignment in alignments:

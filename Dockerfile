@@ -22,6 +22,9 @@ COPY --chown=appuser:appuser requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r /app/requirements.txt
 
+# Create models directory
+RUN mkdir -p /app/models
+
 # Copy app
 COPY --chown=appuser:appuser . /app
 

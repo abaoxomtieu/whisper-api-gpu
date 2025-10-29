@@ -9,6 +9,8 @@ services:
     image: whisper-api:cuda
     ports:
       - "8005:8005"
+    volumes:
+      - ./models:/app/models
     environment:
       NVIDIA_VISIBLE_DEVICES: "all"
       NVIDIA_DRIVER_CAPABILITIES: "compute,utility"

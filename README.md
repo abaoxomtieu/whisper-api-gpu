@@ -43,15 +43,20 @@ Requirements:
 - NVIDIA GPU + drivers
 - Docker + NVIDIA Container Toolkit
 
-Build and run with Compose (recommended):
+### Option 1: Build and run with Compose (recommended)
 
 ```bash
+# Create shared network
 docker network create shared-tts-network || true
+
+# Build and start the service
 docker compose up --build -d
 # Service will listen on http://localhost:8005
 ```
 
-Or run the image directly:
+**Note**: Models are automatically downloaded to `./models/` directory on first run and persisted between container restarts.
+
+### Option 2: Run the image directly
 
 ```bash
 docker build -t whisper-api:cuda .
@@ -59,9 +64,19 @@ docker run -d \
   --name whisper-api \
   --gpus all \
   -p 8005:8005 \
+  -v ./models:/app/models \
   --restart unless-stopped \
   whisper-api:cuda
 ```
+
+### Model Management
+
+- **First run**: Models will be automatically downloaded to `./models/` directory
+- **Subsequent runs**: Models are loaded from the persistent `./models/` directory
+- **Available models**: 
+  - `large-v3-turbo` (default for `/translate-turbo` endpoint)
+  - `small` (used for `/translate-custom` endpoint)
+- **Model persistence**: The `./models/` directory is mounted into the container, so models are preserved between restarts
 
 Healthcheck (inside container): `curl -fsS http://localhost:8005/` should return FastAPI docs page.
 
@@ -140,6 +155,7 @@ Then open `http://localhost:8005/` to see interactive docs.
 - Non‑root user, dedicated virtualenv, and healthcheck baked in.
 - Ports: exposes `8005`.
 - Compose file configures `--gpus all` via `runtime: nvidia` and reservations.
+- **Model persistence**: `./models/` directory is mounted to `/app/models` in container for persistent model storage.
 
 ---
 
@@ -165,6 +181,9 @@ Response model for both endpoints:
 - If you see CPU fallback or CUDA errors, verify your host driver version matches the CUDA container base.
 - For best latency, set `temperature=0.0` and keep audio < 30–60s per request.
 - Word timings require extra alignment work; enable only when needed.
+- **Model download**: On first run, models will be downloaded automatically. This may take several minutes depending on your internet connection.
+- **Model persistence**: Models are stored in `./models/` directory and persist between container restarts. You can manually manage models by adding/removing files from this directory.
+- **Disk space**: Ensure you have sufficient disk space for models (~3GB for large-v3-turbo, ~500MB for small).
 
 ---
 
