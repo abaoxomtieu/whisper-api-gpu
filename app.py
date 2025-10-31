@@ -8,15 +8,27 @@ import os
 import time
 from loguru import logger
 from whisper.tokenizer import get_tokenizer
-from whisper.timing import find_alignment
+from whisper.timing import find_alignment, torch
 from typing import List, Optional
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="Whisper API", version="0.1.0",docs_url="/")
+
+whisper_model = {}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    whisper_model["large-v3-turbo"] = whisper.load_model("large-v3-turbo", device="cuda", download_root="/app/models")
+    whisper_model["small"] = whisper.load_model(
+        "small", device="cuda", download_root="/app/models"
+    )
+    yield
+    for model in whisper_model.values():
+        del model
+
+app = FastAPI(title="Whisper API", version="0.1.0", docs_url="/", lifespan=lifespan)
 
 # Load OpenAI Whisper turbo model on GPU (CUDA)
 # OpenAI Whisper maps "turbo" to the latest turbo-capable large model
-_MODEL_NAME = "large-v3-turbo"
-model = whisper.load_model("large-v3-turbo", device="cuda", download_root="/app/models")
 
 
 class WordTiming(BaseModel):
@@ -47,13 +59,13 @@ async def translate(file: UploadFile = File(...), include_word_timings: str = Fo
             tmp_path = tmp.name
             audio = whisper.load_audio(tmp_path)
             audio = whisper.pad_or_trim(audio)
-            mel = whisper.log_mel_spectrogram(audio, n_mels=model.dims.n_mels).to(model.device)
+            mel = whisper.log_mel_spectrogram(audio, n_mels=whisper_model["large-v3-turbo"].dims.n_mels).to(whisper_model["large-v3-turbo"].device)
             options = whisper.DecodingOptions(
                 temperature=0.0,
                 prompt="This is a bilingual conversation in English và tiếng Việt:"
 
             )
-            result = whisper.decode(model, mel, options)
+            result = whisper.decode(whisper_model["large-v3-turbo"], mel, options)
 
             # Get word-level timestamps only if requested
             word_timings = None
@@ -62,7 +74,7 @@ async def translate(file: UploadFile = File(...), include_word_timings: str = Fo
                 text_tokens = tokenizer.encode(result.text)
 
                 alignments = find_alignment(
-                    model=model,
+                    model=whisper_model["large-v3-turbo"],
                     tokenizer=tokenizer,
                     text_tokens=text_tokens,
                     mel=mel,
@@ -94,8 +106,6 @@ async def translate(file: UploadFile = File(...), include_word_timings: str = Fo
         except Exception:
             pass
 
-model_custom = whisper.load_model("small", device="cuda", download_root="/app/models")
-
 
 @app.post("/translate-custom", response_model=TranslateResponse)
 async def translate_custom(
@@ -117,12 +127,12 @@ async def translate_custom(
             start_time = time.time()
             audio = whisper.load_audio(tmp_path)
             audio = whisper.pad_or_trim(audio)
-            mel = whisper.log_mel_spectrogram(audio).to(model_custom.device)
+            mel = whisper.log_mel_spectrogram(audio).to(whisper_model["small"].device)
             options = whisper.DecodingOptions(
                 task="translate" if translate_to_english else "transcribe",
                 temperature=temperature,
             )
-            result = whisper.decode(model_custom, mel, options)
+            result = whisper.decode(whisper_model["small"], mel, options)
 
             # Get word-level timestamps only if requested
             word_timings = None
@@ -131,7 +141,7 @@ async def translate_custom(
                 text_tokens = tokenizer.encode(result.text)
 
                 alignments = find_alignment(
-                    model=model_custom,
+                    model=whisper_model["small"],
                     tokenizer=tokenizer,
                     text_tokens=text_tokens,
                     mel=mel,
